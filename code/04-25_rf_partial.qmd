@@ -200,7 +200,7 @@ You can find all available recipe step options here: https://tidymodels.github.i
 ```{r weather_recipe}
 weather_recipe <-
   # Defining predicted and predictor variables
-  recipe(strength_gtex ~ .,
+  recipe(strength_gtex ~ ., #change response variable name to categorical col name
          data = weather_train) %>%
   # Removing year and site  
     step_rm(year, site, matches("Jan|Feb|Mar|Apr|Nov|Dec")) #%>%
@@ -225,9 +225,9 @@ Now, we're ready to start the model training process!
 ## 2. Training  
 ### a. Model specification  
 First, let's specify:  
-  - the **type of model** we want to train  
-  - which **engine** we want to use  
-  - which **mode** we want to use  
+  - the **type of model** we want to train  (#name the model/algorithm)
+  - which **engine** we want to use  (#what package are you using)
+  - which **mode** we want to use  (#regression/classification)
 
 > Elastic nets can only be run for a numerical response variable. Random forests can be run with either numerical (regression) or categorical (classification) explanatory variable. Therefore, we have the need to specify the mode here.
 
@@ -243,11 +243,12 @@ A given model type can be fit with different engines (e.g., through different pa
 ```{r rf_spec}
 rf_spec <- 
   # Specifying rf as our model type, asking to tune the hyperparameters
-
+  rand_forest(trees = tune(),
+              mtry = tune()) %>% 
     # Specify the engine
-
+  set_engine("ranger") %>% 
     # Specifying mode  
-
+  set_mode("regression")#"classification for categorical variable
 rf_spec
 ```
 
@@ -296,8 +297,8 @@ set.seed(76544)
 rf_grid_result <- tune_sim_anneal(object = rf_spec,
                      preprocessor = weather_recipe,
                      resamples = resampling_foldcv,
-                    #param_info = rf_param,
-                    iter = 50
+                    #param_info = rf_param,(donot have to do this, because we donot have hyperparameters in engine level)
+                    iter = 10 #50 is thumbrule, but takes long time; it did well on 8 so we're going with 10.
                      )
 
 
@@ -349,7 +350,10 @@ rf_grid_result %>%
 
 ```{r}
 # Based on lowest RMSE
-best_rmse <- rf_grid_result 
+best_rmse <- rf_grid_result %>% 
+  select_by_pct_loss("trees",
+                     metric = "rmse",
+                     limit = 2 )#percent limit; willing to loose 2% of rmse; higher value-less strict
 
 best_rmse
 
@@ -357,7 +361,10 @@ best_rmse
 
 ```{r}
 # Based on greatest R2
-best_r2 <- rf_grid_result 
+best_r2 <- rf_grid_result %>% 
+  select_by_pct_loss("trees",
+                    metric = "rsq",
+                    limit = 2)
 
 
 best_r2
@@ -367,7 +374,7 @@ Based on RMSE, we would choose
   - mtry = 24 
   - trees = 518
 
-Based on R2, we would choose   
+Based on R2, we would choose   (got different on my own processing)
   - mtry = 24
   - trees = 518
 
@@ -377,7 +384,8 @@ Let's use the hyperparameter values that optimized R2 to fit our final model.
 final_spec <- rand_forest(trees = best_r2$trees,
                           mtry = best_r2$mtry) %>%
   # Specify the engine
-
+  set_engine("ranger",
+             importance = "permutation") %>% #could be used "impurity" instead as well. But permutation helps on assessing the differences in accuracy
     # Specifying mode  
   set_mode("regression")
   
@@ -395,7 +403,7 @@ This means 2 things:
 These 2 steps can be completed in one function, as below:  
 
 ```{r final_fit}
-final_fit <- last_fit(final_spec,
+final_fit <- last_fit(final_spec, #train the model on whole training set at once
                 weather_recipe,
                 split = weather_split)
 
@@ -432,6 +440,8 @@ final_spec %>%
       rsq(strength_gtex, .pred)
     
   )
+
+#our training model was able to fit the model quite well (95%), however on testing set, R2 was only 21%
 
 ```
 How does metrics on test compare to metrics on train?  
@@ -475,6 +485,7 @@ final_spec %>%
   geom_col() +
   scale_x_continuous(expand = c(0, 0)) +
   labs(y = NULL)
+
     
 ```
 
